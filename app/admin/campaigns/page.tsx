@@ -11,6 +11,24 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 
 export default function CampaignsPage() {
   const [campaigns, setCampaigns] = useState([])
@@ -22,6 +40,10 @@ export default function CampaignsPage() {
     description: "",
     is_active: true,
   })
+  const [editingCampaign, setEditingCampaign] = useState(null)
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
+  const [campaignToDelete, setCampaignToDelete] = useState(null)
   const router = useRouter()
 
   useEffect(() => {
@@ -105,6 +127,83 @@ export default function CampaignsPage() {
       fetchCampaigns()
     } catch (err) {
       setError("Failed to add campaign")
+      console.error(err)
+    }
+  }
+
+  const handleEdit = (campaign) => {
+    setEditingCampaign(campaign)
+    setFormData({
+      site_name: campaign.site_name,
+      url: campaign.url,
+      description: campaign.description || "",
+      is_active: campaign.is_active,
+    })
+    setIsEditDialogOpen(true)
+  }
+
+  const handleUpdate = async (e: React.FormEvent) => {
+    e.preventDefault()
+    try {
+      const apiKey = localStorage.getItem("adminApiKey")
+
+      if (!apiKey || !editingCampaign) {
+        return
+      }
+
+      const response = await fetch(`/api/admin/campaigns/${editingCampaign.id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+        },
+        body: JSON.stringify(formData),
+      })
+
+      if (!response.ok) {
+        throw new Error("Failed to update campaign")
+      }
+
+      // Reset form and refresh campaigns
+      setFormData({
+        site_name: "",
+        url: "",
+        description: "",
+        is_active: true,
+      })
+      setEditingCampaign(null)
+      setIsEditDialogOpen(false)
+      fetchCampaigns()
+    } catch (err) {
+      setError("Failed to update campaign")
+      console.error(err)
+    }
+  }
+
+  const handleDelete = async () => {
+    try {
+      const apiKey = localStorage.getItem("adminApiKey")
+
+      if (!apiKey || !campaignToDelete) {
+        return
+      }
+
+      const response = await fetch(`/api/admin/campaigns/${campaignToDelete.id}`, {
+        method: "DELETE",
+        headers: {
+          "x-api-key": apiKey,
+        },
+      })
+
+      if (!response.ok) {
+        throw new Error("Failed to delete campaign")
+      }
+
+      setCampaignToDelete(null)
+      setIsDeleteDialogOpen(false)
+      fetchCampaigns()
+    } catch (err) {
+      setError("Failed to delete campaign")
       console.error(err)
     }
   }
@@ -222,10 +321,23 @@ export default function CampaignsPage() {
                       </TableCell>
                       <TableCell>
                         <div className="flex space-x-2">
-                          <Button variant="ghost" size="sm" className="h-8 text-gray-300 hover:text-white">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 text-gray-300 hover:text-white"
+                            onClick={() => handleEdit(campaign)}
+                          >
                             Düzenle
                           </Button>
-                          <Button variant="ghost" size="sm" className="h-8 text-red-400 hover:text-red-300">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 text-red-400 hover:text-red-300"
+                            onClick={() => {
+                              setCampaignToDelete(campaign)
+                              setIsDeleteDialogOpen(true)
+                            }}
+                          >
                             Sil
                           </Button>
                         </div>
@@ -244,6 +356,95 @@ export default function CampaignsPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Düzenleme Dialog */}
+      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+        <DialogContent className="bg-[#1E1E1E] border-[#2A2A2A] text-white">
+          <DialogHeader>
+            <DialogTitle>Kampanya Düzenle</DialogTitle>
+            <DialogDescription className="text-gray-400">Kampanya bilgilerini güncelleyin.</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleUpdate} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit_site_name" className="text-gray-200">
+                Site Adı
+              </Label>
+              <Input
+                id="edit_site_name"
+                name="site_name"
+                className="bg-[#2A2A2A] border-[#3A3A3A] text-white"
+                value={formData.site_name}
+                onChange={handleInputChange}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit_url" className="text-gray-200">
+                URL
+              </Label>
+              <Input
+                id="edit_url"
+                name="url"
+                className="bg-[#2A2A2A] border-[#3A3A3A] text-white"
+                value={formData.url}
+                onChange={handleInputChange}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit_description" className="text-gray-200">
+                Açıklama
+              </Label>
+              <Textarea
+                id="edit_description"
+                name="description"
+                className="bg-[#2A2A2A] border-[#3A3A3A] text-white"
+                value={formData.description}
+                onChange={handleInputChange}
+              />
+            </div>
+            <div className="flex items-center space-x-2">
+              <Switch id="edit_is_active" checked={formData.is_active} onCheckedChange={handleSwitchChange} />
+              <Label htmlFor="edit_is_active" className="text-gray-200">
+                Yayında
+              </Label>
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsEditDialogOpen(false)}
+                className="border-[#3A3A3A] text-white"
+              >
+                İptal
+              </Button>
+              <Button type="submit" className="bg-emerald-500 hover:bg-emerald-600 text-white">
+                Güncelle
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Silme Dialog */}
+      <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <AlertDialogContent className="bg-[#1E1E1E] border-[#2A2A2A] text-white">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Kampanyayı Sil</AlertDialogTitle>
+            <AlertDialogDescription className="text-gray-400">
+              Bu kampanyayı silmek istediğinizden emin misiniz? Bu işlem geri alınamaz.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="bg-[#2A2A2A] border-[#3A3A3A] text-white hover:bg-[#3A3A3A]">
+              İptal
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} className="bg-red-500 hover:bg-red-600 text-white">
+              Sil
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
