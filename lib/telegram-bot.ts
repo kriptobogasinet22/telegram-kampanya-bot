@@ -12,24 +12,45 @@ if (!botToken) {
 // Bot örneğini oluştur
 const bot = new Telegraf(botToken)
 
+// Debug modu
+bot.use(async (ctx, next) => {
+  console.log("Bot mesajı alındı:", ctx.update)
+  await next()
+})
+
 // Middleware
 bot.use(session())
 
 // Komutlar
 bot.start(async (ctx) => {
   try {
+    console.log("Start komutu alındı:", ctx.from)
     const telegramId = ctx.from.id
     const username = ctx.from.username || ""
 
     // Kullanıcıyı veritabanında kontrol et
-    const { data: existingUser } = await supabaseAdmin.from("users").select("*").eq("telegram_id", telegramId).single()
+    const { data: existingUser, error: userError } = await supabaseAdmin
+      .from("users")
+      .select("*")
+      .eq("telegram_id", telegramId)
+      .single()
+
+    if (userError && userError.code !== "PGRST116") {
+      console.error("Kullanıcı sorgulama hatası:", userError)
+      throw userError
+    }
 
     if (!existingUser) {
       // Kullanıcı yoksa, yeni kullanıcı oluştur
-      await supabaseAdmin.from("users").insert({
+      const { error: insertError } = await supabaseAdmin.from("users").insert({
         telegram_id: telegramId,
         username: username,
       })
+
+      if (insertError) {
+        console.error("Kullanıcı ekleme hatası:", insertError)
+        throw insertError
+      }
     }
 
     // Hoş geldin mesajı
@@ -45,6 +66,11 @@ bot.start(async (ctx) => {
     console.error("Start komutunda hata:", error)
     await ctx.reply("Bir hata oluştu. Lütfen daha sonra tekrar deneyin.")
   }
+})
+
+// Test komutu ekleyelim
+bot.command("test", async (ctx) => {
+  await ctx.reply("Bot çalışıyor! 👍")
 })
 
 // Ana menü butonları için işleyiciler
