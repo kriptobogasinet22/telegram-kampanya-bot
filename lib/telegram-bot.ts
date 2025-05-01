@@ -1,4 +1,4 @@
-import { Telegraf, session, Markup } from "telegraf"
+import { Telegraf, session } from "telegraf"
 import { supabaseAdmin } from "./supabase"
 import { message } from "telegraf/filters"
 
@@ -19,7 +19,7 @@ bot.use(async (ctx, next) => {
   console.log("Bot yanıtı gönderildi")
 })
 
-// Middleware
+// Session middleware
 bot.use(session())
 
 // Komutlar
@@ -57,11 +57,12 @@ bot.start(async (ctx) => {
     // Hoş geldin mesajı
     await ctx.reply(
       "Hoş Geldiniz! 👋\n\nKampanya ve fırsatları kaçırmamak için botumuzla tanışın.\n\nNasıl Kullanılır:\n• Kayıt olarak başlayın\n• Kampanya linklerini keşfedin\n• Günlük hatırlatıcıları ayarlayın",
-      Markup.keyboard([
-        ["📝 Kayıt Ol", "🎯 Kampanya Linkleri"],
-        ["📢 Duyurular", "⏰ Günlük Hatırlatıcı"],
-        ["⚙️ Ayarlar"],
-      ]).resize(),
+      {
+        reply_markup: {
+          keyboard: [["📝 Kayıt Ol", "🎯 Kampanya Linkleri"], ["📢 Duyurular", "⏰ Günlük Hatırlatıcı"], ["⚙️ Ayarlar"]],
+          resize_keyboard: true,
+        },
+      },
     )
   } catch (error) {
     console.error("Start komutunda hata:", error)
@@ -75,7 +76,7 @@ bot.command("test", async (ctx) => {
 })
 
 // Ana menü butonları için işleyiciler
-bot.hears("📝 Kayıt Ol", async (ctx) => {
+bot.hears(["📝 Kayıt Ol", "Kayıt Ol"], async (ctx) => {
   try {
     const telegramId = ctx.from.id
 
@@ -110,34 +111,58 @@ bot.hears("📝 Kayıt Ol", async (ctx) => {
 
 // Kullanıcı adı girişini bekle
 bot.on(message("text"), async (ctx) => {
-  if (ctx.session?.waitingForNickname) {
-    const nickname = ctx.message.text
-    const telegramId = ctx.from.id
+  try {
+    // Eğer kullanıcı kayıt modundaysa
+    if (ctx.session?.waitingForNickname) {
+      const nickname = ctx.message.text
+      const telegramId = ctx.from.id
 
-    try {
-      // Kullanıcı adını güncelle
-      await supabaseAdmin.from("users").update({ nickname }).eq("telegram_id", telegramId)
+      try {
+        // Kullanıcı adını güncelle
+        await supabaseAdmin.from("users").update({ nickname }).eq("telegram_id", telegramId)
 
-      // Kayıt başarılı mesajı
-      await ctx.reply(
-        `✅ Kayıt Başarılı\n\nMerhaba ${nickname}!\n\nBaşarıyla kayıt oldunuz. Artık tüm özellikleri kullanabilirsiniz.`,
-      )
+        // Kayıt başarılı mesajı
+        await ctx.reply(
+          `✅ Kayıt Başarılı\n\nMerhaba ${nickname}!\n\nBaşarıyla kayıt oldunuz. Artık tüm özellikleri kullanabilirsiniz.`,
+        )
 
-      // Kullanıcıyı kayıt modundan çıkar
-      ctx.session.waitingForNickname = false
-    } catch (error) {
-      console.error("Kullanıcı adı güncellemede hata:", error)
-      await ctx.reply("Bir hata oluştu. Lütfen daha sonra tekrar deneyin.")
+        // Kullanıcıyı kayıt modundan çıkar
+        ctx.session.waitingForNickname = false
+      } catch (error) {
+        console.error("Kullanıcı adı güncellemede hata:", error)
+        await ctx.reply("Bir hata oluştu. Lütfen daha sonra tekrar deneyin.")
+      }
+      return
     }
-    return
-  }
 
-  // Eğer özel bir mod yoksa, mesajı anlamadığını belirt
-  await ctx.reply("Üzgünüm, bu mesajı anlamadım. Lütfen menüdeki butonları kullanın.")
+    // Diğer butonlar için kontrol
+    const text = ctx.message.text
+
+    if (text === "🎯 Kampanya Linkleri" || text === "Kampanya Linkleri") {
+      await handleCampaignLinks(ctx)
+    } else if (text === "📢 Duyurular" || text === "Duyurular") {
+      await handleAnnouncements(ctx)
+    } else if (text === "⏰ Günlük Hatırlatıcı" || text === "Günlük Hatırlatıcı") {
+      await handleDailyReminder(ctx)
+    } else if (text === "⚙️ Ayarlar" || text === "Ayarlar") {
+      await handleSettings(ctx)
+    } else {
+      // Eğer özel bir mod yoksa, mesajı anlamadığını belirt
+      await ctx.reply("Üzgünüm, bu mesajı anlamadım. Lütfen menüdeki butonları kullanın.", {
+        reply_markup: {
+          keyboard: [["📝 Kayıt Ol", "🎯 Kampanya Linkleri"], ["📢 Duyurular", "⏰ Günlük Hatırlatıcı"], ["⚙️ Ayarlar"]],
+          resize_keyboard: true,
+        },
+      })
+    }
+  } catch (error) {
+    console.error("Mesaj işlemede hata:", error)
+    await ctx.reply("Bir hata oluştu. Lütfen daha sonra tekrar deneyin.")
+  }
 })
 
-// Kampanya Linkleri
-bot.hears("🎯 Kampanya Linkleri", async (ctx) => {
+// Kampanya Linkleri işleyicisi
+async function handleCampaignLinks(ctx) {
   try {
     // Kullanıcının kayıtlı olup olmadığını kontrol et
     const telegramId = ctx.from.id
@@ -173,7 +198,9 @@ bot.hears("🎯 Kampanya Linkleri", async (ctx) => {
       const message = `*${campaign.site_name}*\n${campaign.description}`
       await ctx.reply(message, {
         parse_mode: "Markdown",
-        ...Markup.inlineKeyboard([Markup.button.url("Hemen Git", campaign.url)]),
+        reply_markup: {
+          inline_keyboard: [[{ text: "Hemen Git", url: campaign.url }]],
+        },
       })
 
       // Tıklama kaydı ekle
@@ -186,10 +213,10 @@ bot.hears("🎯 Kampanya Linkleri", async (ctx) => {
     console.error("Kampanya listesinde hata:", error)
     await ctx.reply("Kampanyalar getirilirken bir hata oluştu. Lütfen daha sonra tekrar deneyin.")
   }
-})
+}
 
-// Duyurular
-bot.hears("📢 Duyurular", async (ctx) => {
+// Duyurular işleyicisi
+async function handleAnnouncements(ctx) {
   try {
     // Kullanıcının kayıtlı olup olmadığını kontrol et
     const telegramId = ctx.from.id
@@ -238,88 +265,26 @@ bot.hears("📢 Duyurular", async (ctx) => {
 
     const isSubscribed = subscription?.is_active || false
 
-    await ctx.reply(
-      "Duyuru bildirimleri:",
-      Markup.inlineKeyboard([
-        Markup.button.callback(
-          isSubscribed ? "❌ Abonelikten Çık" : "✅ Abone Ol",
-          isSubscribed ? "unsubscribe_announcements" : "subscribe_announcements",
-        ),
-      ]),
-    )
+    await ctx.reply("Duyuru bildirimleri:", {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            {
+              text: isSubscribed ? "❌ Abonelikten Çık" : "✅ Abone Ol",
+              callback_data: isSubscribed ? "unsubscribe_announcements" : "subscribe_announcements",
+            },
+          ],
+        ],
+      },
+    })
   } catch (error) {
     console.error("Duyuru listesinde hata:", error)
     await ctx.reply("Duyurular getirilirken bir hata oluştu. Lütfen daha sonra tekrar deneyin.")
   }
-})
+}
 
-// Abone ol/çık butonları için işleyiciler
-bot.action("subscribe_announcements", async (ctx) => {
-  try {
-    const telegramId = ctx.from?.id
-    if (!telegramId) return
-
-    const { data: user } = await supabaseAdmin.from("users").select("id").eq("telegram_id", telegramId).single()
-
-    if (user) {
-      // Önce mevcut aboneliği kontrol et
-      const { data: existingSubscription } = await supabaseAdmin
-        .from("subscriptions")
-        .select("*")
-        .eq("user_id", user.id)
-        .eq("subscription_type", "announcements")
-        .single()
-
-      if (existingSubscription) {
-        // Varsa güncelle
-        await supabaseAdmin.from("subscriptions").update({ is_active: true }).eq("id", existingSubscription.id)
-      } else {
-        // Yoksa yeni ekle
-        await supabaseAdmin.from("subscriptions").insert({
-          user_id: user.id,
-          subscription_type: "announcements",
-          is_active: true,
-        })
-      }
-
-      await ctx.editMessageText("Duyuru bildirimleri: ✅ Abone oldunuz")
-      await ctx.editMessageReplyMarkup(
-        Markup.inlineKeyboard([Markup.button.callback("❌ Abonelikten Çık", "unsubscribe_announcements")]),
-      )
-    }
-  } catch (error) {
-    console.error("Abone olmada hata:", error)
-    await ctx.reply("Bir hata oluştu. Lütfen daha sonra tekrar deneyin.")
-  }
-})
-
-bot.action("unsubscribe_announcements", async (ctx) => {
-  try {
-    const telegramId = ctx.from?.id
-    if (!telegramId) return
-
-    const { data: user } = await supabaseAdmin.from("users").select("id").eq("telegram_id", telegramId).single()
-
-    if (user) {
-      await supabaseAdmin
-        .from("subscriptions")
-        .update({ is_active: false })
-        .eq("user_id", user.id)
-        .eq("subscription_type", "announcements")
-
-      await ctx.editMessageText("Duyuru bildirimleri: ❌ Abonelikten çıktınız")
-      await ctx.editMessageReplyMarkup(
-        Markup.inlineKeyboard([Markup.button.callback("✅ Abone Ol", "subscribe_announcements")]),
-      )
-    }
-  } catch (error) {
-    console.error("Abonelikten çıkmada hata:", error)
-    await ctx.reply("Bir hata oluştu. Lütfen daha sonra tekrar deneyin.")
-  }
-})
-
-// Günlük Hatırlatıcı
-bot.hears("⏰ Günlük Hatırlatıcı", async (ctx) => {
+// Günlük Hatırlatıcı işleyicisi
+async function handleDailyReminder(ctx) {
   try {
     // Kullanıcının kayıtlı olup olmadığını kontrol et
     const telegramId = ctx.from.id
@@ -340,83 +305,30 @@ bot.hears("⏰ Günlük Hatırlatıcı", async (ctx) => {
       return
     }
 
-    await ctx.reply(
-      "Günlük kampanya hatırlatıcısı için bir saat seçin:",
-      Markup.inlineKeyboard([
-        [
-          Markup.button.callback("09:00", "reminder_09:00"),
-          Markup.button.callback("12:00", "reminder_12:00"),
-          Markup.button.callback("15:00", "reminder_15:00"),
+    await ctx.reply("Günlük kampanya hatırlatıcısı için bir saat seçin:", {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "09:00", callback_data: "reminder_09:00" },
+            { text: "12:00", callback_data: "reminder_12:00" },
+            { text: "15:00", callback_data: "reminder_15:00" },
+          ],
+          [
+            { text: "18:00", callback_data: "reminder_18:00" },
+            { text: "21:00", callback_data: "reminder_21:00" },
+          ],
+          [{ text: "Hatırlatıcıyı Kapat", callback_data: "reminder_off" }],
         ],
-        [Markup.button.callback("18:00", "reminder_18:00"), Markup.button.callback("21:00", "reminder_21:00")],
-        [Markup.button.callback("Hatırlatıcıyı Kapat", "reminder_off")],
-      ]),
-    )
+      },
+    })
   } catch (error) {
     console.error("Hatırlatıcı ayarlamada hata:", error)
     await ctx.reply("Bir hata oluştu. Lütfen daha sonra tekrar deneyin.")
   }
-})
+}
 
-// Hatırlatıcı butonları için işleyiciler
-bot.action(/reminder_(\d{2}:\d{2})/, async (ctx) => {
-  try {
-    const match = ctx.match[1]
-    const time = match
-    const telegramId = ctx.from?.id
-
-    if (!telegramId) return
-
-    const { data: user } = await supabaseAdmin.from("users").select("id").eq("telegram_id", telegramId).single()
-
-    if (user) {
-      // Önce mevcut hatırlatıcıyı kontrol et
-      const { data: existingReminder } = await supabaseAdmin
-        .from("reminders")
-        .select("*")
-        .eq("user_id", user.id)
-        .single()
-
-      if (existingReminder) {
-        // Varsa güncelle
-        await supabaseAdmin.from("reminders").update({ time, is_active: true }).eq("id", existingReminder.id)
-      } else {
-        // Yoksa yeni ekle
-        await supabaseAdmin.from("reminders").insert({
-          user_id: user.id,
-          time,
-          is_active: true,
-        })
-      }
-
-      await ctx.editMessageText(`Günlük hatırlatıcı ${time} için ayarlandı.`)
-    }
-  } catch (error) {
-    console.error("Hatırlatıcı ayarlamada hata:", error)
-    await ctx.reply("Bir hata oluştu. Lütfen daha sonra tekrar deneyin.")
-  }
-})
-
-bot.action("reminder_off", async (ctx) => {
-  try {
-    const telegramId = ctx.from?.id
-    if (!telegramId) return
-
-    const { data: user } = await supabaseAdmin.from("users").select("id").eq("telegram_id", telegramId).single()
-
-    if (user) {
-      await supabaseAdmin.from("reminders").update({ is_active: false }).eq("user_id", user.id)
-
-      await ctx.editMessageText("Günlük hatırlatıcı kapatıldı.")
-    }
-  } catch (error) {
-    console.error("Hatırlatıcı kapatmada hata:", error)
-    await ctx.reply("Bir hata oluştu. Lütfen daha sonra tekrar deneyin.")
-  }
-})
-
-// Ayarlar
-bot.hears("⚙️ Ayarlar", async (ctx) => {
+// Ayarlar işleyicisi
+async function handleSettings(ctx) {
   try {
     const telegramId = ctx.from.id
 
@@ -460,33 +372,94 @@ bot.hears("⚙️ Ayarlar", async (ctx) => {
 
     await ctx.reply(settingsMessage, {
       parse_mode: "Markdown",
-      ...Markup.inlineKeyboard([
-        [Markup.button.callback("Kullanıcı Adını Değiştir", "change_nickname")],
-        [
-          Markup.button.callback(
-            announcementsSub ? "Duyuru Bildirimlerini Kapat" : "Duyuru Bildirimlerini Aç",
-            announcementsSub ? "unsubscribe_announcements" : "subscribe_announcements",
-          ),
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "Kullanıcı Adını Değiştir", callback_data: "change_nickname" }],
+          [
+            {
+              text: announcementsSub ? "Duyuru Bildirimlerini Kapat" : "Duyuru Bildirimlerini Aç",
+              callback_data: announcementsSub ? "unsubscribe_announcements" : "subscribe_announcements",
+            },
+          ],
+          [
+            {
+              text: campaignsSub ? "Kampanya Bildirimlerini Kapat" : "Kampanya Bildirimlerini Aç",
+              callback_data: campaignsSub ? "unsubscribe_campaigns" : "subscribe_campaigns",
+            },
+          ],
+          [{ text: "Hatırlatıcı Ayarla", callback_data: "set_reminder" }],
         ],
-        [
-          Markup.button.callback(
-            campaignsSub ? "Kampanya Bildirimlerini Kapat" : "Kampanya Bildirimlerini Aç",
-            campaignsSub ? "unsubscribe_campaigns" : "subscribe_campaigns",
-          ),
-        ],
-        [Markup.button.callback("Hatırlatıcı Ayarla", "set_reminder")],
-      ]),
+      },
     })
   } catch (error) {
     console.error("Ayarlar getirilirken hata:", error)
     await ctx.reply("Ayarlar getirilirken bir hata oluştu. Lütfen daha sonra tekrar deneyin.")
   }
+}
+
+// Abone ol/çık butonları için işleyiciler
+bot.action("subscribe_announcements", async (ctx) => {
+  try {
+    const telegramId = ctx.from?.id
+    if (!telegramId) return
+
+    const { data: user } = await supabaseAdmin.from("users").select("id").eq("telegram_id", telegramId).single()
+
+    if (user) {
+      // Önce mevcut aboneliği kontrol et
+      const { data: existingSubscription } = await supabaseAdmin
+        .from("subscriptions")
+        .select("*")
+        .eq("user_id", user.id)
+        .eq("subscription_type", "announcements")
+        .single()
+
+      if (existingSubscription) {
+        // Varsa güncelle
+        await supabaseAdmin.from("subscriptions").update({ is_active: true }).eq("id", existingSubscription.id)
+      } else {
+        // Yoksa yeni ekle
+        await supabaseAdmin.from("subscriptions").insert({
+          user_id: user.id,
+          subscription_type: "announcements",
+          is_active: true,
+        })
+      }
+
+      await ctx.editMessageText("Duyuru bildirimleri: ✅ Abone oldunuz")
+      await ctx.editMessageReplyMarkup({
+        inline_keyboard: [[{ text: "❌ Abonelikten Çık", callback_data: "unsubscribe_announcements" }]],
+      })
+    }
+  } catch (error) {
+    console.error("Abone olmada hata:", error)
+    await ctx.reply("Bir hata oluştu. Lütfen daha sonra tekrar deneyin.")
+  }
 })
 
-// Kullanıcı adı değiştirme
-bot.action("change_nickname", async (ctx) => {
-  await ctx.reply("Lütfen yeni kullanıcı adınızı girin:")
-  ctx.session = { ...ctx.session, waitingForNickname: true }
+bot.action("unsubscribe_announcements", async (ctx) => {
+  try {
+    const telegramId = ctx.from?.id
+    if (!telegramId) return
+
+    const { data: user } = await supabaseAdmin.from("users").select("id").eq("telegram_id", telegramId).single()
+
+    if (user) {
+      await supabaseAdmin
+        .from("subscriptions")
+        .update({ is_active: false })
+        .eq("user_id", user.id)
+        .eq("subscription_type", "announcements")
+
+      await ctx.editMessageText("Duyuru bildirimleri: ❌ Abonelikten çıktınız")
+      await ctx.editMessageReplyMarkup({
+        inline_keyboard: [[{ text: "✅ Abone Ol", callback_data: "subscribe_announcements" }]],
+      })
+    }
+  } catch (error) {
+    console.error("Abonelikten çıkmada hata:", error)
+    await ctx.reply("Bir hata oluştu. Lütfen daha sonra tekrar deneyin.")
+  }
 })
 
 // Kampanya aboneliği
@@ -548,19 +521,86 @@ bot.action("unsubscribe_campaigns", async (ctx) => {
   }
 })
 
+// Kullanıcı adı değiştirme
+bot.action("change_nickname", async (ctx) => {
+  await ctx.reply("Lütfen yeni kullanıcı adınızı girin:")
+  ctx.session = { ...ctx.session, waitingForNickname: true }
+})
+
 bot.action("set_reminder", async (ctx) => {
-  await ctx.reply(
-    "Günlük kampanya hatırlatıcısı için bir saat seçin:",
-    Markup.inlineKeyboard([
-      [
-        Markup.button.callback("09:00", "reminder_09:00"),
-        Markup.button.callback("12:00", "reminder_12:00"),
-        Markup.button.callback("15:00", "reminder_15:00"),
+  await ctx.reply("Günlük kampanya hatırlatıcısı için bir saat seçin:", {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: "09:00", callback_data: "reminder_09:00" },
+          { text: "12:00", callback_data: "reminder_12:00" },
+          { text: "15:00", callback_data: "reminder_15:00" },
+        ],
+        [
+          { text: "18:00", callback_data: "reminder_18:00" },
+          { text: "21:00", callback_data: "reminder_21:00" },
+        ],
+        [{ text: "Hatırlatıcıyı Kapat", callback_data: "reminder_off" }],
       ],
-      [Markup.button.callback("18:00", "reminder_18:00"), Markup.button.callback("21:00", "reminder_21:00")],
-      [Markup.button.callback("Hatırlatıcıyı Kapat", "reminder_off")],
-    ]),
-  )
+    },
+  })
+})
+
+// Hatırlatıcı butonları için işleyiciler
+bot.action(/reminder_(\d{2}:\d{2})/, async (ctx) => {
+  try {
+    const match = ctx.match[1]
+    const time = match
+    const telegramId = ctx.from?.id
+
+    if (!telegramId) return
+
+    const { data: user } = await supabaseAdmin.from("users").select("id").eq("telegram_id", telegramId).single()
+
+    if (user) {
+      // Önce mevcut hatırlatıcıyı kontrol et
+      const { data: existingReminder } = await supabaseAdmin
+        .from("reminders")
+        .select("*")
+        .eq("user_id", user.id)
+        .single()
+
+      if (existingReminder) {
+        // Varsa güncelle
+        await supabaseAdmin.from("reminders").update({ time, is_active: true }).eq("id", existingReminder.id)
+      } else {
+        // Yoksa yeni ekle
+        await supabaseAdmin.from("reminders").insert({
+          user_id: user.id,
+          time,
+          is_active: true,
+        })
+      }
+
+      await ctx.editMessageText(`Günlük hatırlatıcı ${time} için ayarlandı.`)
+    }
+  } catch (error) {
+    console.error("Hatırlatıcı ayarlamada hata:", error)
+    await ctx.reply("Bir hata oluştu. Lütfen daha sonra tekrar deneyin.")
+  }
+})
+
+bot.action("reminder_off", async (ctx) => {
+  try {
+    const telegramId = ctx.from?.id
+    if (!telegramId) return
+
+    const { data: user } = await supabaseAdmin.from("users").select("id").eq("telegram_id", telegramId).single()
+
+    if (user) {
+      await supabaseAdmin.from("reminders").update({ is_active: false }).eq("user_id", user.id)
+
+      await ctx.editMessageText("Günlük hatırlatıcı kapatıldı.")
+    }
+  } catch (error) {
+    console.error("Hatırlatıcı kapatmada hata:", error)
+    await ctx.reply("Bir hata oluştu. Lütfen daha sonra tekrar deneyin.")
+  }
 })
 
 // Hata yakalama
